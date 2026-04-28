@@ -2,11 +2,13 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>비행기 요격 게임</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: #000; display: flex; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
-  canvas { border: 2px solid #0ff; box-shadow: 0 0 24px #0ff5; display: block; }
+  body { background: #000; display: flex; align-items: center; justify-content: center; height: 100vh; overflow: hidden; touch-action: none; }
+  canvas { border: 2px solid #0ff; box-shadow: 0 0 24px #0ff5; display: block;
+           max-width: 100vw; max-height: 100vh; width: auto; height: auto; }
 </style>
 </head>
 <body>
@@ -24,13 +26,41 @@ document.addEventListener('keydown', e => {
 });
 document.addEventListener('keyup', e => KEY[e.code] = false);
 
+// ─── 터치 입력 ───────────────────────────────────────────
+function getTouchCanvasPos(touch) {
+  const r = canvas.getBoundingClientRect();
+  return {
+    x: (touch.clientX - r.left) * (W / r.width),
+    y: (touch.clientY - r.top)  * (H / r.height),
+  };
+}
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  touchPos = getTouchCanvasPos(e.touches[0]);
+  // 타이틀/클리어/오버 화면에서 탭하면 시작
+  if (state === 'title') { KEY['Enter'] = true; }
+  if (state === 'clear' || state === 'over') { KEY['Enter'] = true; }
+  // 두 손가락 탭 = 폭탄
+  if (e.touches.length >= 2 && powerups && powerups.bomb) useBomb();
+}, { passive: false });
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  touchPos = getTouchCanvasPos(e.touches[0]);
+}, { passive: false });
+canvas.addEventListener('touchend', e => {
+  e.preventDefault();
+  if (e.touches.length === 0) touchPos = null;
+  else touchPos = getTouchCanvasPos(e.touches[0]);
+}, { passive: false });
+
 // ─── 전역 ────────────────────────────────────────────────
 let state, frame, score, lives;
 let combo, comboTimer;
 let player, bullets, enemies, particles, drops, boss;
 let shootCooldown, enemyTimer, stateTimer;
 let powerups, stars;
-let villainKills; // 격추한 빌런 수
+let villainKills;
+let touchPos = null; // 터치 위치
 
 // ─── 빌런 4인방 정의 ─────────────────────────────────────
 const VILLAINS = [
@@ -150,10 +180,27 @@ function update() {
 
   // ── PLAY ───────────────────────────────────────────────
   const spd = player.speed + (powerups.speed > 0 ? 2.2 : 0);
+
+  // 키보드 이동
   if ((KEY['ArrowLeft']||KEY['KeyA']) && player.x > player.w/2)     player.x -= spd;
   if ((KEY['ArrowRight']||KEY['KeyD']) && player.x < W-player.w/2)  player.x += spd;
   if ((KEY['ArrowUp']||KEY['KeyW']) && player.y > H*0.3)            player.y -= spd;
   if ((KEY['ArrowDown']||KEY['KeyS']) && player.y < H-player.h/2)   player.y += spd;
+
+  // 터치 이동: 손가락 위치로 부드럽게 따라감
+  if (touchPos) {
+    const dx = touchPos.x - player.x;
+    const dy = touchPos.y - player.y;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    if (dist > 6) {
+      player.x += (dx / dist) * Math.min(spd * 1.4, dist);
+      player.y += (dy / dist) * Math.min(spd * 1.4, dist);
+    }
+    // 화면 경계 클램프
+    player.x = Math.max(player.w/2, Math.min(W-player.w/2, player.x));
+    player.y = Math.max(H*0.3, Math.min(H-player.h/2, player.y));
+  }
+
   if (player.inv > 0) player.inv--;
 
   if ((KEY['KeyZ']||KEY['KeyX']) && powerups.bomb) {
@@ -161,9 +208,9 @@ function update() {
   }
   for (const k of ['rapid','triple','shield','speed']) if (powerups[k]>0) powerups[k]--;
 
-  // 발사
+  // ★ 자동 발사 (키보드 Space 또는 자동)
   if (shootCooldown > 0) shootCooldown--;
-  if (KEY['Space'] && shootCooldown === 0) {
+  if (shootCooldown === 0) {
     const cd = powerups.rapid > 0 ? 4 : 10;
     bullets.push({ x:player.x, y:player.y-player.h/2, w:4, h:14, vy:-13, owner:'player' });
     if (powerups.triple > 0) {
@@ -436,9 +483,25 @@ function drawHUD() {
     ctx.fillRect(px,puY-7,44,14);
     ctx.fillStyle='#fff'; ctx.globalAlpha=1;
     ctx.fillText('Z:폭탄', px+22, puY);
+
+    // 모바일용 폭탄 버튼 (우하단 큰 버튼)
+    ctx.fillStyle='rgba(255,60,60,0.75)'; ctx.globalAlpha=1;
+    ctx.beginPath(); ctx.arc(W-38, H-46, 26, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle='#fff'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(W-38, H-46, 26, 0, Math.PI*2); ctx.stroke();
+    ctx.fillStyle='#fff'; ctx.font='bold 12px sans-serif';
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('💣폭탄', W-38, H-46);
   }
   ctx.globalAlpha=1; ctx.textBaseline='alphabetic';
 }
+
+// 폭탄 버튼 터치 감지
+canvas.addEventListener('touchstart', e => {
+  if (!powerups || !powerups.bomb) return;
+  const pos = getTouchCanvasPos(e.touches[0]);
+  if (Math.hypot(pos.x-(W-38), pos.y-(H-46)) < 30) useBomb();
+}, { passive: false });
 
 // ─── 전체 draw ────────────────────────────────────────────
 function draw() {
