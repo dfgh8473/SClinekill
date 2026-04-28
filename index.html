@@ -16,7 +16,7 @@ const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const W = canvas.width, H = canvas.height;
 
-// ─── 입력 ───────────────────────────────────────────────
+// ─── 입력 ────────────────────────────────────────────────
 const KEY = {};
 document.addEventListener('keydown', e => {
   KEY[e.code] = true;
@@ -24,210 +24,141 @@ document.addEventListener('keydown', e => {
 });
 document.addEventListener('keyup', e => KEY[e.code] = false);
 
-// ─── 전역 변수 ───────────────────────────────────────────
-let state, frame, score, lives, stage;
-let killCount, killTarget, bossSpawned;
+// ─── 전역 ────────────────────────────────────────────────
+let state, frame, score, lives;
 let combo, comboTimer;
 let player, bullets, enemies, particles, drops, boss;
 let shootCooldown, enemyTimer, stateTimer;
 let powerups, stars;
+let villainKills; // 격추한 빌런 수
 
-// ─── 스테이지 설정 ──────────────────────────────────────
-const STAGES = [
-  {
-    name: 'STAGE 1', sub: '하늘을 지켜라',
-    killTarget: 20, spawnRate: 75,
-    types: ['fighter', 'fighter', 'fighter', 'drone'],
-    boss: { hp: 35, name: '붉은 독수리', w: 68, h: 58, pattern: 'spread' },
-    bg: '#050510',
-  },
-  {
-    name: 'STAGE 2', sub: '폭격기 부대 출현',
-    killTarget: 32, spawnRate: 50,
-    types: ['fighter', 'drone', 'drone', 'bomber'],
-    boss: { hp: 70, name: '강철 폭풍', w: 80, h: 70, pattern: 'aimed' },
-    bg: '#0a0508',
-  },
-  {
-    name: 'STAGE 3', sub: '최후의 결전',
-    killTarget: 50, spawnRate: 32,
-    types: ['fighter', 'drone', 'bomber', 'stealth', 'stealth'],
-    boss: { hp: 120, name: '블랙 이글 사령관', w: 94, h: 82, pattern: 'burst' },
-    bg: '#030a03',
-  },
+// ─── 빌런 4인방 정의 ─────────────────────────────────────
+const VILLAINS = [
+  { type:'junseob',   w:40, h:42, hp:6, maxHp:6, speed:0.55, score:200, color:'#ff6600', label:'정준섭', isVillain:true },
+  { type:'sangsu',    w:40, h:42, hp:6, maxHp:6, speed:0.60, score:200, color:'#00dd44', label:'김상수', isVillain:true },
+  { type:'mihee',     w:40, h:42, hp:6, maxHp:6, speed:0.50, score:200, color:'#ff44cc', label:'고미희', isVillain:true },
+  { type:'hyunkyung', w:40, h:42, hp:6, maxHp:6, speed:0.58, score:200, color:'#44aaff', label:'이현경', isVillain:true },
 ];
 
-// ─── 파워업 종류 ─────────────────────────────────────────
+// ─── 일반 적 ─────────────────────────────────────────────
+const ENEMY_CFG = {
+  fighter: { w:28, h:30, hp:1, maxHp:1, speed:1.8, score:10, color:'#f44' },
+  drone:   { w:24, h:26, hp:1, maxHp:1, speed:3.0, score:15, color:'#f80' },
+  bomber:  { w:40, h:36, hp:4, maxHp:4, speed:0.9, score:30, color:'#a0f' },
+};
+
+// ─── 파워업 ───────────────────────────────────────────────
 const DROP_DEFS = [
-  { id: 'rapid',  label: '속사', color: '#f80', dur: 550 },
-  { id: 'triple', label: '3연발', color: '#ff0', dur: 480 },
-  { id: 'shield', label: '실드', color: '#0ff', dur: 420 },
-  { id: 'speed',  label: '가속', color: '#0f8', dur: 500 },
-  { id: 'life',   label: '1UP', color: '#f0f', dur: 0   },
-  { id: 'bomb',   label: '폭탄', color: '#f44', dur: 0   },
+  { id:'rapid',  label:'속사', color:'#f80', dur:550 },
+  { id:'triple', label:'3연발', color:'#ff0', dur:480 },
+  { id:'shield', label:'실드', color:'#0ff', dur:420 },
+  { id:'speed',  label:'가속', color:'#0f8', dur:500 },
+  { id:'life',   label:'1UP',  color:'#f0f', dur:0   },
+  { id:'bomb',   label:'폭탄', color:'#f44', dur:0   },
 ];
 
-// ─── 초기화 ─────────────────────────────────────────────
+// ─── 초기화 ──────────────────────────────────────────────
 function initGame() {
-  frame = 0; score = 0; lives = 3; stage = 0;
-  combo = 0; comboTimer = 0;
-  stars = Array.from({length: 110}, () => ({
+  frame = 0; score = 0; lives = 3;
+  combo = 0; comboTimer = 0; villainKills = 0;
+  stars = Array.from({length:110}, () => ({
     x: Math.random()*W, y: Math.random()*H,
     s: Math.random()*1.5+0.3, v: Math.random()*1.5+0.5,
   }));
-  player = { x: W/2, y: H-80, w: 36, h: 40, speed: 5, inv: 0 };
-  initStage();
-}
-
-function initStage() {
-  const cfg = STAGES[stage];
-  killCount = 0; killTarget = cfg.killTarget; bossSpawned = false;
-  bullets = []; enemies = []; particles = []; drops = [];
-  boss = null; shootCooldown = 0; enemyTimer = 0;
+  player = { x: W/2, y: H-80, w:36, h:40, speed:5, inv:0 };
+  bullets=[]; enemies=[]; particles=[]; drops=[];
+  boss=null; shootCooldown=0; enemyTimer=0;
   powerups = { rapid:0, triple:0, shield:0, speed:0, bomb:false };
-  if (player) { player.x = W/2; player.y = H-80; player.inv = 0; }
+
+  // ★ 빌런 4대 동시 등장 (화면 위에서 간격 맞춰 진입)
+  VILLAINS.forEach((v, i) => {
+    enemies.push({
+      ...v,
+      flash: 0,
+      x: 70 + i * 115,
+      y: -50 - i * 35,
+      vx: (i % 2 === 0 ? 0.5 : -0.5),
+      vy: v.speed,
+    });
+  });
 }
 
 // ─── 유틸 ────────────────────────────────────────────────
 function rect(a, b) {
   return Math.abs(a.x-b.x) < (a.w+b.w)/2 && Math.abs(a.y-b.y) < (a.h+b.h)/2;
 }
-
 function explode(x, y, color, n=14) {
   for (let i=0; i<n; i++) {
     const a = (Math.PI*2/n)*i + Math.random()*0.5;
     const v = 1.5 + Math.random()*3;
-    particles.push({ x, y, color,
-      vx: Math.cos(a)*v, vy: Math.sin(a)*v,
-      r: 2+Math.random()*5, life:40+Math.random()*20, maxLife:60 });
+    particles.push({ x, y, color, vx:Math.cos(a)*v, vy:Math.sin(a)*v,
+      r:2+Math.random()*5, life:40+Math.random()*20, maxLife:60 });
   }
 }
 
-// ─── 적 생성 ────────────────────────────────────────────
-const ENEMY_CFG = {
-  fighter:   { w:30, h:32, hp:1, maxHp:1, speed:1.8, score:10, color:'#f44' },
-  drone:     { w:26, h:28, hp:1, maxHp:1, speed:3.0, score:15, color:'#f80' },
-  bomber:    { w:42, h:38, hp:5, maxHp:5, speed:0.9, score:40, color:'#a0f' },
-  stealth:   { w:28, h:30, hp:2, maxHp:2, speed:2.2, score:25, color:'#5a8' },
-  junseob:   { w:38, h:40, hp:5, maxHp:5, speed:2.0, score:100, color:'#ff6600', label:'정준섭' },
-  sangsu:    { w:38, h:40, hp:5, maxHp:5, speed:2.5, score:100, color:'#00dd44', label:'김상수' },
-  mihee:     { w:38, h:40, hp:5, maxHp:5, speed:1.9, score:100, color:'#ff44cc', label:'고미희' },
-  hyunkyung: { w:38, h:40, hp:5, maxHp:5, speed:2.3, score:100, color:'#44aaff', label:'이현경' },
-};
-
-const VILLAINS = ['junseob','sangsu','mihee','hyunkyung'];
-
+// ─── 적 스폰 ─────────────────────────────────────────────
+const ENEMY_TYPES = ['fighter','fighter','fighter','drone','drone','bomber'];
 function spawnEnemy() {
-  const cfg = STAGES[stage];
-  const type = Math.random() < 0.15
-    ? VILLAINS[Math.floor(Math.random()*VILLAINS.length)]
-    : cfg.types[Math.floor(Math.random()*cfg.types.length)];
+  const type = ENEMY_TYPES[Math.floor(Math.random()*ENEMY_TYPES.length)];
   const base = { ...ENEMY_CFG[type] };
-  base.speed += stage * 0.35;
-  if (type === 'bomber') base.hp += stage * 2, base.maxHp = base.hp;
-
-  const side = Math.random() < 0.12;
   enemies.push({
-    type, ...base, flash: 0,
-    x: side ? (Math.random()<.5 ? -20 : W+20) : base.w/2 + Math.random()*(W-base.w),
-    y: side ? 60 + Math.random()*(H*0.4) : -base.h/2,
-    vx: side ? (Math.random()<.5 ? 1.8 : -1.8) : (Math.random()-.5)*1.6,
+    type, ...base, flash:0,
+    x: base.w/2 + Math.random()*(W-base.w),
+    y: -base.h/2,
+    vx: (Math.random()-0.5)*1.6,
   });
-}
-
-function spawnBoss() {
-  const bc = STAGES[stage].boss;
-  boss = {
-    type:'boss', ...bc,
-    x: W/2, y: -bc.h,
-    maxHp: bc.hp,
-    vx: 1.6 + stage*0.4, speed: 1.5,
-    score: 600 + stage*350,
-    phase: 1, shootTimer: 0, flash: 0,
-  };
-  bossSpawned = true;
 }
 
 // ─── 폭탄 ────────────────────────────────────────────────
 function useBomb() {
   if (!powerups.bomb) return;
   powerups.bomb = false;
-  for (const e of enemies) explode(e.x, e.y, e.color, 8);
-  enemies = [];
-  if (boss) boss.hp = Math.max(1, boss.hp - 15);
+  for (const e of enemies) if (!e.isVillain) explode(e.x, e.y, e.color, 8);
+  enemies = enemies.filter(e => e.isVillain);
   explode(W/2, H/2, '#ff0', 50);
 }
 
 // ─── 드롭 ────────────────────────────────────────────────
 function tryDrop(x, y) {
-  if (Math.random() > 0.22) return;
+  if (Math.random() > 0.25) return;
   const d = DROP_DEFS[Math.floor(Math.random()*DROP_DEFS.length)];
-  drops.push({ x, y, ...d, w:20, h:20, vy:1.6, life:280, maxLife:280 });
+  drops.push({ x, y, ...d, w:20, h:20, vy:1.6, life:280 });
 }
 
-// ─── 업데이트 ───────────────────────────────────────────
+// ─── 업데이트 ────────────────────────────────────────────
 function update() {
   frame++;
   for (const s of stars) { s.y += s.v; if (s.y > H) s.y = 0; }
   if (comboTimer > 0) comboTimer--; else combo = 0;
 
-  // 타이틀
   if (state === 'title') {
     if (KEY['Enter'] || KEY['Space']) {
       KEY['Enter'] = KEY['Space'] = false;
-      initGame(); state = 'intro'; stateTimer = 130;
+      initGame(); state = 'play';
     }
     return;
   }
-  // 스테이지 인트로
-  if (state === 'intro') {
-    stateTimer--;
-    if (stateTimer <= 0 || KEY['Space'] || KEY['Enter']) {
-      KEY['Space'] = KEY['Enter'] = false;
-      state = 'play';
-    }
-    return;
-  }
-  // 스테이지 클리어
-  if (state === 'clear') {
-    stateTimer--;
-    if (stateTimer <= 0 || KEY['Space'] || KEY['Enter']) {
-      KEY['Space'] = KEY['Enter'] = false;
-      if (stage + 1 < STAGES.length) {
-        stage++;
-        initStage();
-        state = 'intro'; stateTimer = 140;
-      } else {
-        state = 'allclear';
-      }
-    }
-    return;
-  }
-  // 사망 딜레이
   if (state === 'dead') {
     stateTimer--;
     if (stateTimer <= 0) { player.inv = 180; state = 'play'; }
     return;
   }
-  // 게임오버 / 올클리어
-  if (state === 'over' || state === 'allclear') {
+  if (state === 'clear' || state === 'over') {
     if (KEY['Enter']) { KEY['Enter'] = false; state = 'title'; player = null; }
     return;
   }
 
-  // ── PLAY ─────────────────────────────────────────────
+  // ── PLAY ───────────────────────────────────────────────
   const spd = player.speed + (powerups.speed > 0 ? 2.2 : 0);
   if ((KEY['ArrowLeft']||KEY['KeyA']) && player.x > player.w/2)     player.x -= spd;
   if ((KEY['ArrowRight']||KEY['KeyD']) && player.x < W-player.w/2)  player.x += spd;
-  if ((KEY['ArrowUp']||KEY['KeyW']) && player.y > H*0.35)           player.y -= spd;
+  if ((KEY['ArrowUp']||KEY['KeyW']) && player.y > H*0.3)            player.y -= spd;
   if ((KEY['ArrowDown']||KEY['KeyS']) && player.y < H-player.h/2)   player.y += spd;
   if (player.inv > 0) player.inv--;
 
   if ((KEY['KeyZ']||KEY['KeyX']) && powerups.bomb) {
-    KEY['KeyZ'] = KEY['KeyX'] = false;
-    useBomb();
+    KEY['KeyZ'] = KEY['KeyX'] = false; useBomb();
   }
-
   for (const k of ['rapid','triple','shield','speed']) if (powerups[k]>0) powerups[k]--;
 
   // 발사
@@ -235,88 +166,43 @@ function update() {
   if (KEY['Space'] && shootCooldown === 0) {
     const cd = powerups.rapid > 0 ? 4 : 10;
     bullets.push({ x:player.x, y:player.y-player.h/2, w:4, h:14, vy:-13, owner:'player' });
-    if (powerups.triple > 0 || stage >= 2) {
-      const spread = powerups.triple > 0 ? 1.2 : 0.4;
-      bullets.push({ x:player.x-12, y:player.y-22, w:3, h:10, vy:-12, vx:-spread, owner:'player', color:'#8ff' });
-      bullets.push({ x:player.x+12, y:player.y-22, w:3, h:10, vy:-12, vx: spread, owner:'player', color:'#8ff' });
-    }
-    if (stage >= 2 && powerups.triple > 0) { // 스테이지 2+ 트리플 = 5연발
-      bullets.push({ x:player.x-22, y:player.y-16, w:3, h:8, vy:-10, vx:-2.0, owner:'player', color:'#f8f' });
-      bullets.push({ x:player.x+22, y:player.y-16, w:3, h:8, vy:-10, vx: 2.0, owner:'player', color:'#f8f' });
+    if (powerups.triple > 0) {
+      bullets.push({ x:player.x-14, y:player.y-22, w:3, h:10, vy:-12, vx:-1.2, owner:'player', color:'#8ff' });
+      bullets.push({ x:player.x+14, y:player.y-22, w:3, h:10, vy:-12, vx: 1.2, owner:'player', color:'#8ff' });
     }
     shootCooldown = cd;
   }
 
-  // 총알 이동
   bullets = bullets.filter(b => {
     b.x += b.vx||0; b.y += b.vy;
     return b.y > -40 && b.y < H+40 && b.x > -40 && b.x < W+40;
   });
 
-  // 적 스폰
-  if (!bossSpawned) {
-    enemyTimer++;
-    const rate = Math.max(18, STAGES[stage].spawnRate - frame*0.008);
-    if (enemyTimer >= rate) { spawnEnemy(); enemyTimer = 0; }
-    if (killCount >= killTarget) spawnBoss();
-  }
-
-  // 보스
-  if (boss) {
-    if (boss.phase === 1 && boss.hp <= boss.maxHp*0.6) boss.phase = 2;
-    if (boss.phase === 2 && boss.hp <= boss.maxHp*0.3) boss.phase = 3;
-    if (boss.y < 95) boss.y += 2.2;
-    else { boss.x += boss.vx * (boss.phase===3?1.4:boss.phase===2?1.2:1); if (boss.x<boss.w/2||boss.x>W-boss.w/2) boss.vx*=-1; }
-    if (boss.flash > 0) boss.flash--;
-    boss.shootTimer++;
-    const bsr = Math.max(10, 42 - stage*5 - (boss.phase-1)*7);
-    if (boss.shootTimer >= bsr) {
-      boss.shootTimer = 0;
-      const bs = 3.5 + boss.phase*0.6;
-      if (boss.pattern === 'spread') {
-        const n = 4 + boss.phase;
-        for (let i=-(n/2)|0; i<=(n/2)|0; i++)
-          bullets.push({ x:boss.x+i*14, y:boss.y+boss.h/2, w:6, h:12, vy:bs, vx:i*0.45, color:'#f04', owner:'boss' });
-      } else if (boss.pattern === 'aimed') {
-        const dx=player.x-boss.x, dy=player.y-boss.y;
-        const a = Math.atan2(dy, dx);
-        for (let sp=-1; sp<=1; sp++) {
-          const ang = a + sp*0.22;
-          bullets.push({ x:boss.x, y:boss.y+boss.h/2, w:7, h:7, vy:Math.sin(ang)*(bs+1), vx:Math.cos(ang)*(bs+1), color:'#fa0', owner:'boss' });
-        }
-        if (boss.phase >= 2) { // 추가 고정탄
-          for (let i=-2; i<=2; i++)
-            bullets.push({ x:boss.x+i*18, y:boss.y+boss.h/2, w:5, h:10, vy:2.5, color:'#f04', owner:'boss' });
-        }
-      } else { // burst
-        const cn = 8 + boss.phase*3;
-        for (let i=0; i<cn; i++) {
-          const a2 = (Math.PI*2/cn)*i + frame*0.07;
-          bullets.push({ x:boss.x, y:boss.y, w:7, h:7, vy:Math.sin(a2)*bs, vx:Math.cos(a2)*bs, color:'#f00', owner:'boss' });
-        }
-        if (boss.phase === 3) { // 2중 링
-          for (let i=0; i<cn; i++) {
-            const a2 = (Math.PI*2/cn)*i + frame*0.07 + Math.PI/cn;
-            bullets.push({ x:boss.x, y:boss.y, w:5, h:5, vy:Math.sin(a2)*(bs*0.6), vx:Math.cos(a2)*(bs*0.6), color:'#f80', owner:'boss' });
-          }
-        }
-      }
-    }
-  }
+  // 일반 적 스폰
+  enemyTimer++;
+  if (enemyTimer >= 70) { spawnEnemy(); enemyTimer = 0; }
 
   // 적 이동
   for (const e of enemies) {
-    e.x += e.vx||0; e.y += e.speed;
-    if (e.x<e.w/2||e.x>W-e.w/2) e.vx=-(e.vx||0);
-    if (e.flash>0) e.flash--;
+    e.x += e.vx||0;
+    if (e.isVillain) {
+      // 빌런은 화면 안에서 천천히 돌아다님
+      e.y += e.vy;
+      if (e.y < 50)      e.vy =  Math.abs(e.vy);
+      if (e.y > H * 0.68) e.vy = -Math.abs(e.vy);
+    } else {
+      e.y += e.speed;
+    }
+    if (e.x < e.w/2 || e.x > W-e.w/2) e.vx = -(e.vx||0);
+    if (e.flash > 0) e.flash--;
   }
-  enemies = enemies.filter(e => e.y < H+80 && e.x > -80 && e.x < W+80);
+  // 일반 적만 화면 밖 제거 (빌런은 유지)
+  enemies = enemies.filter(e => e.isVillain || e.y < H+80);
 
-  // 드롭 이동
   for (const d of drops) { d.y += d.vy; d.life--; }
   drops = drops.filter(d => d.y < H+40 && d.life > 0);
 
-  // ── 충돌 ─────────────────────────────────────────────
+  // ── 충돌 ────────────────────────────────────────────────
   const remB = new Set(), remE = new Set();
   for (let bi=0; bi<bullets.length; bi++) {
     const b = bullets[bi];
@@ -328,23 +214,19 @@ function update() {
       remB.add(bi); e.hp--; e.flash = 6;
       if (e.hp <= 0) {
         remE.add(ei);
-        explode(e.x, e.y, e.color);
+        explode(e.x, e.y, e.color, e.isVillain ? 25 : 14);
         tryDrop(e.x, e.y);
-        killCount++; combo++; comboTimer = 100;
+        combo++; comboTimer = 100;
         score += e.score * Math.max(1, 1 + Math.floor(combo/5));
+        if (e.isVillain) {
+          villainKills++;
+          if (villainKills >= 4) {
+            state = 'clear'; stateTimer = 300;
+            return;
+          }
+        }
       }
       break;
-    }
-    if (boss && !remB.has(bi) && rect(b, boss)) {
-      remB.add(bi); boss.hp--; boss.flash = 4;
-      explode(b.x, b.y, '#f04', 5);
-      if (boss.hp <= 0) {
-        explode(boss.x, boss.y, '#f80', 40);
-        score += boss.score;
-        boss = null;
-        state = 'clear'; stateTimer = 200;
-        return;
-      }
     }
   }
   bullets  = bullets.filter((_,i) => !remB.has(i));
@@ -354,7 +236,6 @@ function update() {
   if (player.inv === 0 && powerups.shield === 0) {
     let hit = false;
     for (const e of enemies) if (rect(player,e)) { hit=true; break; }
-    if (!hit && boss && rect(player,boss)) hit = true;
     if (!hit) for (const b of bullets) if (b.owner!=='player' && rect(player,b)) { hit=true; break; }
     if (hit) {
       explode(player.x, player.y, '#0cf', 22);
@@ -377,7 +258,6 @@ function update() {
     }
   }
 
-  // 파티클
   for (const p of particles) { p.x+=p.vx; p.y+=p.vy; p.vy+=0.04; p.life--; }
   particles = particles.filter(p => p.life > 0);
 }
@@ -397,6 +277,7 @@ function drawPlayer() {
   if (p.inv > 0 && Math.floor(frame/4)%2===0) return;
   ctx.save();
   ctx.translate(p.x, p.y);
+
   if (powerups.shield > 0) {
     ctx.strokeStyle = `hsl(${frame*6%360},100%,70%)`;
     ctx.lineWidth = 2.5;
@@ -420,12 +301,13 @@ function drawPlayer() {
     ctx.strokeStyle='#f80'; ctx.lineWidth=2;
     ctx.beginPath(); ctx.moveTo(-p.w/2,-p.h/4); ctx.lineTo(p.w/2,-p.h/4); ctx.stroke();
   }
-  // 이름 태그
-  ctx.fillStyle='rgba(0,0,0,0.6)';
-  ctx.fillRect(-30, -p.h/2-19, 60, 15);
-  ctx.fillStyle='#0ff';
-  ctx.font='bold 11px sans-serif';
-  ctx.textAlign='center'; ctx.textBaseline='middle';
+
+  // ★ 봉봉이 이름 태그
+  ctx.fillStyle = 'rgba(0,0,0,0.65)';
+  ctx.fillRect(-32, -p.h/2-20, 64, 16);
+  ctx.fillStyle = '#0ff';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText('봉봉이 ←', 0, -p.h/2-12);
   ctx.restore();
 }
@@ -433,69 +315,44 @@ function drawPlayer() {
 function drawEnemy(e) {
   ctx.save();
   ctx.translate(e.x, e.y);
+
+  // 빌런 발광 효과
+  if (e.isVillain) {
+    ctx.shadowColor = e.color;
+    ctx.shadowBlur = 12 + Math.sin(frame*0.1)*4;
+  }
+
   ctx.fillStyle = e.flash>0 ? '#fff' : e.color;
-  if (e.type==='stealth') ctx.globalAlpha = 0.38 + Math.sin(frame*0.08)*0.1;
   ctx.beginPath();
   ctx.moveTo(0,e.h/2); ctx.lineTo(-e.w/2,-e.h/2);
   ctx.lineTo(-e.w/6,-e.h/4); ctx.lineTo(0,-e.h/2+8);
   ctx.lineTo(e.w/6,-e.h/4); ctx.lineTo(e.w/2,-e.h/2);
   ctx.closePath(); ctx.fill();
-  ctx.globalAlpha = 1;
-  if (e.type==='bomber' || e.label) {
-    ctx.fillStyle='#222'; ctx.fillRect(-e.w/2,e.h/2+2,e.w,4);
-    ctx.fillStyle=e.color; ctx.fillRect(-e.w/2,e.h/2+2,e.w*(e.hp/e.maxHp),4);
+  ctx.shadowBlur = 0;
+
+  // HP 바 (빌런 + 폭격기)
+  if (e.isVillain || e.type==='bomber') {
+    ctx.fillStyle='#222'; ctx.fillRect(-e.w/2, e.h/2+2, e.w, 5);
+    ctx.fillStyle = e.color; ctx.fillRect(-e.w/2, e.h/2+2, e.w*(e.hp/e.maxHp), 5);
   }
+
+  // ★ 빌런 이름 태그
   if (e.label) {
-    ctx.fillStyle='rgba(0,0,0,0.65)';
-    ctx.fillRect(-e.w/2-2, -e.h/2-17, e.w+4, 14);
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(-e.w/2-2, -e.h/2-20, e.w+4, 17);
     ctx.fillStyle = e.flash>0 ? '#fff' : e.color;
-    ctx.font='bold 11px sans-serif';
-    ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.fillText(e.label, 0, -e.h/2-10);
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(e.label, 0, -e.h/2-12);
   }
   ctx.restore();
-}
-
-function drawBoss() {
-  if (!boss) return;
-  const pc = ['#f04','#f80','#ff0'][boss.phase-1];
-  ctx.save();
-  ctx.translate(boss.x, boss.y);
-  ctx.fillStyle = boss.flash>0 ? '#fff' : pc;
-  ctx.beginPath();
-  ctx.moveTo(0,-boss.h/2); ctx.lineTo(-boss.w/2,0);
-  ctx.lineTo(-boss.w/3,boss.h/2); ctx.lineTo(0,boss.h/3);
-  ctx.lineTo(boss.w/3,boss.h/2); ctx.lineTo(boss.w/2,0);
-  ctx.closePath(); ctx.fill();
-  ctx.fillStyle = ['#f80','#ff0','#fff'][boss.phase-1];
-  ctx.beginPath(); ctx.arc(0,0,13+boss.phase*2,0,Math.PI*2); ctx.fill();
-  // 페이즈 오라
-  if (boss.phase>=2) {
-    ctx.globalAlpha=0.18+Math.sin(frame*0.15)*0.1;
-    ctx.fillStyle = boss.phase===3?'#ff0':'#f80';
-    ctx.beginPath(); ctx.arc(0,0,boss.w/2+8,0,Math.PI*2); ctx.fill();
-    ctx.globalAlpha=1;
-  }
-  ctx.restore();
-
-  // 보스 HP 바 (상단)
-  const bx=10, by=18, bw=W-20, bh=13;
-  ctx.fillStyle='#111'; ctx.fillRect(bx,by,bw,bh);
-  const r=boss.hp/boss.maxHp;
-  ctx.fillStyle=r>0.5?'#f04':r>0.25?'#f80':'#ff0';
-  ctx.fillRect(bx,by,bw*r,bh);
-  ctx.strokeStyle='#f04'; ctx.lineWidth=1; ctx.strokeRect(bx,by,bw,bh);
-  ctx.fillStyle='#fff'; ctx.font='9px Courier New'; ctx.textAlign='center'; ctx.textBaseline='middle';
-  ctx.fillText(`BOSS: ${boss.name}  ${boss.hp}/${boss.maxHp}  PHASE ${boss.phase}`, W/2, by+bh/2+1);
-  ctx.textBaseline='alphabetic';
 }
 
 function drawBullet(b) {
   ctx.save();
   ctx.shadowColor = b.color||'#ff0'; ctx.shadowBlur=10;
   ctx.fillStyle = b.color||'#ff0';
-  if (b.w===b.h) { ctx.beginPath(); ctx.arc(b.x,b.y,b.w/2,0,Math.PI*2); ctx.fill(); }
-  else ctx.fillRect(b.x-b.w/2, b.y-b.h/2, b.w, b.h);
+  ctx.fillRect(b.x-b.w/2, b.y-b.h/2, b.w, b.h);
   ctx.restore();
 }
 
@@ -509,7 +366,6 @@ function drawDrop(d) {
   ctx.fillStyle='#000'; ctx.font='bold 8px Courier New';
   ctx.textAlign='center'; ctx.textBaseline='middle';
   ctx.fillText(d.label, d.x, d.y);
-  ctx.textBaseline='alphabetic';
   ctx.restore();
 }
 
@@ -522,34 +378,39 @@ function drawParticle(p) {
 }
 
 function drawHUD() {
-  const cfg = STAGES[stage];
+  // 상단 빌런 진행
+  ctx.fillStyle='rgba(0,0,0,0.55)'; ctx.fillRect(0,0,W,22);
+  ctx.font='bold 13px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillStyle='#ff0';
+  ctx.fillText(`빌런 격추: ${villainKills} / 4`, W/2, 11);
 
-  // 킬 진행 바 (화면 상단 5px)
-  const prog = bossSpawned ? 1 : killCount/killTarget;
-  ctx.fillStyle='#1a1a1a'; ctx.fillRect(0,0,W,5);
-  ctx.fillStyle = bossSpawned?'#f04':'#0f8';
-  ctx.fillRect(0,0,W*prog,5);
+  // 빌런별 생존 표시
+  const vStates = VILLAINS.map(v => enemies.some(e => e.label === v.label));
+  vStates.forEach((alive, i) => {
+    const vx = 20 + i * 110;
+    ctx.fillStyle = alive ? VILLAINS[i].color : '#333';
+    ctx.globalAlpha = alive ? 1 : 0.4;
+    ctx.font = 'bold 10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(VILLAINS[i].label, vx + 35, 11);
+    ctx.globalAlpha = 1;
+  });
 
   // 하단 HUD
   ctx.fillStyle='rgba(0,0,0,0.55)'; ctx.fillRect(0,H-20,W,20);
   ctx.font='12px Courier New'; ctx.textBaseline='middle';
   ctx.fillStyle='#0ff'; ctx.textAlign='left';
-  ctx.fillText(cfg.name, 8, H-10);
+  ctx.fillText('봉봉이의 복수', 8, H-10);
   ctx.fillStyle='#ff0'; ctx.textAlign='center';
   ctx.fillText(`SCORE: ${score.toLocaleString()}`, W/2, H-10);
   ctx.fillStyle='#f88'; ctx.textAlign='right';
-  ctx.fillText('♥'.repeat(lives) + '♡'.repeat(Math.max(0,5-lives)), W-8, H-10);
-
-  // 킬 카운트 (우상단)
-  ctx.fillStyle='#aaa'; ctx.font='11px Courier New'; ctx.textAlign='right'; ctx.textBaseline='top';
-  ctx.fillText(bossSpawned?'BOSS!!':`${killCount}/${killTarget}`, W-8, 8);
+  ctx.fillText('♥'.repeat(lives)+'♡'.repeat(Math.max(0,5-lives)), W-8, H-10);
 
   // 콤보
   if (combo >= 3) {
     ctx.save();
     ctx.textAlign='center'; ctx.textBaseline='middle';
-    const sz = 14+Math.min(combo,12);
-    ctx.font=`bold ${sz}px Courier New`;
+    ctx.font=`bold ${14+Math.min(combo,12)}px Courier New`;
     ctx.fillStyle=`hsl(${60-combo*4},100%,65%)`;
     ctx.globalAlpha=Math.min(1, comboTimer/40);
     ctx.fillText(`× ${combo} COMBO!`, W/2, H/2-50);
@@ -559,9 +420,9 @@ function drawHUD() {
   // 파워업 아이콘
   let px=8; const puY=H-36;
   ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.font='9px Courier New';
-  for (const {id,label,color} of DROP_DEFS.slice(0,4)) {
+  for (const {id,label,color,dur} of DROP_DEFS.slice(0,4)) {
     if (powerups[id]>0) {
-      const ratio = powerups[id] / DROP_DEFS.find(d=>d.id===id).dur;
+      const ratio = powerups[id]/dur;
       ctx.fillStyle=color; ctx.globalAlpha=0.75;
       ctx.fillRect(px,puY-7,38,14);
       ctx.fillStyle='#0002'; ctx.fillRect(px,puY-7,38*(1-ratio),14);
@@ -579,122 +440,104 @@ function drawHUD() {
   ctx.globalAlpha=1; ctx.textBaseline='alphabetic';
 }
 
-// ─── 화면 전체 draw ────────────────────────────────────
+// ─── 전체 draw ────────────────────────────────────────────
 function draw() {
-  ctx.fillStyle = stage < STAGES.length ? STAGES[stage].bg : '#050510';
+  ctx.fillStyle='#050510';
   ctx.fillRect(0,0,W,H);
   drawStars();
 
-  // 타이틀
   if (state==='title') {
     ctx.textAlign='center';
     ctx.shadowColor='#0ff'; ctx.shadowBlur=22;
-    ctx.fillStyle='#0ff'; ctx.font='bold 46px Courier New';
-    ctx.fillText('비행기 요격', W/2, H/2-80);
+    ctx.fillStyle='#0ff'; ctx.font='bold 42px Courier New';
+    ctx.fillText('비행기 요격', W/2, H/2-90);
     ctx.shadowBlur=0;
-    ctx.fillStyle='#aef'; ctx.font='15px Courier New';
-    const lines = ['방향키 / WASD : 이동','Space : 발사','Z : 폭탄 사용 (드롭 아이템)','──────────────────────','♥ 3스테이지 클리어가 목표!','파워업은 적 격추 시 22% 확률 드롭'];
-    lines.forEach((l,i) => ctx.fillText(l, W/2, H/2-24+i*22));
+    ctx.fillStyle='#ff0'; ctx.font='bold 18px sans-serif';
+    ctx.fillText('봉봉이의 복수극', W/2, H/2-48);
+
+    // 빌런 소개
+    ctx.font='14px sans-serif';
+    VILLAINS.forEach((v,i) => {
+      ctx.fillStyle = v.color;
+      ctx.fillText(`${v.label}  을(를) 격추하라!`, W/2, H/2+i*26);
+    });
+
+    ctx.fillStyle='#aaa'; ctx.font='13px Courier New';
+    ctx.fillText('방향키이동  Space발사  Z폭탄', W/2, H/2+120);
     if (Math.floor(frame/22)%2) {
       ctx.fillStyle='#ff0'; ctx.font='bold 20px Courier New';
-      ctx.fillText('[ Enter / Space ] 시작', W/2, H/2+120);
+      ctx.fillText('[ Enter / Space ] 시작', W/2, H/2+152);
     }
     return;
   }
 
-  // 인트로
-  if (state==='intro') {
-    const cfg = STAGES[stage];
-    const fade = Math.min(1,(130-stateTimer)/22);
-    ctx.globalAlpha=fade;
-    ctx.textAlign='center';
-    ctx.shadowColor='#0ff'; ctx.shadowBlur=30;
-    ctx.fillStyle='#0ff'; ctx.font='bold 54px Courier New';
-    ctx.fillText(cfg.name, W/2, H/2-35);
-    ctx.shadowBlur=0;
-    ctx.fillStyle='#ff0'; ctx.font='22px Courier New';
-    ctx.fillText(cfg.sub, W/2, H/2+18);
-    ctx.fillStyle='#888'; ctx.font='13px Courier New';
-    ctx.fillText(`적 ${cfg.killTarget}기 격추 → 보스 처치`, W/2, H/2+56);
-    ctx.globalAlpha=1;
-    return;
-  }
-
-  // 게임 플레이 중
   for (const p of particles) drawParticle(p);
   for (const d of drops) drawDrop(d);
   for (const b of bullets) drawBullet(b);
   for (const e of enemies) drawEnemy(e);
-  drawBoss();
   if (player) drawPlayer();
   drawHUD();
 
-  // 사망 플래시
   if (state==='dead') {
     ctx.fillStyle='rgba(255,30,30,0.28)'; ctx.fillRect(0,0,W,H);
   }
 
-  // 스테이지 클리어
+  // ★ 클리어 화면 "신용산으로 모여 !"
   if (state==='clear') {
-    ctx.fillStyle='rgba(0,0,0,0.55)'; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='rgba(0,0,0,0.65)'; ctx.fillRect(0,0,W,H);
     ctx.textAlign='center';
-    ctx.shadowColor='#0ff'; ctx.shadowBlur=18;
-    ctx.fillStyle='#0ff'; ctx.font='bold 46px Courier New';
-    ctx.fillText('STAGE CLEAR!', W/2, H/2-40);
-    ctx.shadowBlur=0;
-    ctx.fillStyle='#ff0'; ctx.font='20px Courier New';
-    ctx.fillText(`점수: ${score.toLocaleString()}`, W/2, H/2+14);
-    if (stage+1 < STAGES.length) {
-      ctx.fillStyle='#aaa'; ctx.font='14px Courier New';
-      ctx.fillText(`다음: ${STAGES[stage+1].name} — ${STAGES[stage+1].sub}`, W/2, H/2+50);
-      ctx.fillText('[ Space / Enter ] 계속', W/2, H/2+78);
+
+    // 반짝이는 배경 별 효과
+    for (let i=0; i<8; i++) {
+      const a = (Math.PI*2/8)*i + frame*0.03;
+      const r = 80 + Math.sin(frame*0.05)*20;
+      ctx.fillStyle=`hsl(${frame*3+i*45},100%,60%)`;
+      ctx.globalAlpha=0.5;
+      ctx.beginPath(); ctx.arc(W/2+Math.cos(a)*r, H/2+Math.sin(a)*r*0.5, 4, 0, Math.PI*2); ctx.fill();
     }
+    ctx.globalAlpha=1;
+
+    ctx.shadowColor='#ff0'; ctx.shadowBlur=30;
+    ctx.fillStyle='#ff0';
+    ctx.font='bold 52px sans-serif';
+    ctx.fillText('신용산으로 모여 !', W/2, H/2-30);
+    ctx.shadowBlur=0;
+
+    ctx.fillStyle='#0ff'; ctx.font='20px Courier New';
+    ctx.fillText(`점수: ${score.toLocaleString()}`, W/2, H/2+36);
+    ctx.fillStyle='#f88'; ctx.font='14px Courier New';
+    ctx.fillText('빌런 4인방 전원 격추 완료!', W/2, H/2+68);
+    ctx.fillStyle='#aaa';
+    ctx.fillText('[ Enter ] 타이틀', W/2, H/2+102);
     return;
   }
 
-  // 게임 오버
   if (state==='over') {
     ctx.fillStyle='rgba(0,0,0,0.72)'; ctx.fillRect(0,0,W,H);
     ctx.textAlign='center';
     ctx.shadowColor='#f44'; ctx.shadowBlur=20;
-    ctx.fillStyle='#f44'; ctx.font='bold 52px Courier New';
+    ctx.fillStyle='#f44'; ctx.font='bold 50px Courier New';
     ctx.fillText('GAME OVER', W/2, H/2-50);
     ctx.shadowBlur=0;
     ctx.fillStyle='#ff0'; ctx.font='22px Courier New';
-    ctx.fillText(`최종 점수: ${score.toLocaleString()}`, W/2, H/2+10);
+    ctx.fillText(`점수: ${score.toLocaleString()}`, W/2, H/2+10);
     ctx.fillStyle='#aaa'; ctx.font='15px Courier New';
-    ctx.fillText(`도달: ${STAGES[stage].name}`, W/2, H/2+46);
+    ctx.fillText(`빌런 격추: ${villainKills}/4`, W/2, H/2+46);
     ctx.fillStyle='#0ff'; ctx.fillText('[ Enter ] 타이틀', W/2, H/2+82);
-  }
-
-  // 올 클리어
-  if (state==='allclear') {
-    ctx.fillStyle='rgba(0,0,0,0.72)'; ctx.fillRect(0,0,W,H);
-    ctx.textAlign='center';
-    ctx.shadowColor='#ff0'; ctx.shadowBlur=28;
-    ctx.fillStyle='#ff0'; ctx.font='bold 42px Courier New';
-    ctx.fillText('ALL CLEAR!!', W/2, H/2-60);
-    ctx.shadowBlur=0;
-    ctx.fillStyle='#0ff'; ctx.font='22px Courier New';
-    ctx.fillText(`최종 점수: ${score.toLocaleString()}`, W/2, H/2);
-    ctx.fillStyle='#f80'; ctx.font='15px Courier New';
-    ctx.fillText('3스테이지 모두 클리어!', W/2, H/2+38);
-    ctx.fillStyle='#aaa'; ctx.fillText('[ Enter ] 타이틀', W/2, H/2+76);
   }
 }
 
-// ─── 메인 루프 ───────────────────────────────────────────
+// ─── 루프 ─────────────────────────────────────────────────
 function loop() { update(); draw(); requestAnimationFrame(loop); }
 
-// ─── 시작 ─────────────────────────────────────────────
-frame=0; stage=0; score=0;
+frame=0;
 stars = Array.from({length:110}, ()=>({
   x:Math.random()*W, y:Math.random()*H,
   s:Math.random()*1.5+0.3, v:Math.random()*1.5+0.5,
 }));
 bullets=[]; enemies=[]; particles=[]; drops=[];
 powerups={rapid:0,triple:0,shield:0,speed:0,bomb:false};
-player=null; boss=null; bossSpawned=false;
+player=null; villainKills=0;
 state='title';
 loop();
 </script>
