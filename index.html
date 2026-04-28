@@ -36,12 +36,35 @@ function getTouchCanvasPos(touch) {
 }
 canvas.addEventListener('touchstart', e => {
   e.preventDefault();
-  touchPos = getTouchCanvasPos(e.touches[0]);
-  // 타이틀/클리어/오버 화면에서 탭하면 시작
-  if (state === 'title') { KEY['Enter'] = true; }
-  if (state === 'clear' || state === 'over') { KEY['Enter'] = true; }
+  const pos = getTouchCanvasPos(e.touches[0]);
+
+  // 타이틀 → 게임 시작
+  if (state === 'title') {
+    touchPos = null;
+    initGame();
+    state = 'play';
+    return;
+  }
+  // 클리어/오버 → 타이틀
+  if (state === 'clear' || state === 'over') {
+    state = 'title';
+    player = null;
+    touchPos = null;
+    return;
+  }
+  // 게임 중: 폭탄 버튼 영역 탭
+  if (state === 'play' && powerups && powerups.bomb) {
+    if (Math.hypot(pos.x - (W-38), pos.y - (H-46)) < 32) {
+      useBomb();
+      return;
+    }
+  }
   // 두 손가락 탭 = 폭탄
-  if (e.touches.length >= 2 && powerups && powerups.bomb) useBomb();
+  if (e.touches.length >= 2 && powerups && powerups.bomb) {
+    useBomb();
+    return;
+  }
+  touchPos = pos;
 }, { passive: false });
 canvas.addEventListener('touchmove', e => {
   e.preventDefault();
@@ -496,12 +519,6 @@ function drawHUD() {
   ctx.globalAlpha=1; ctx.textBaseline='alphabetic';
 }
 
-// 폭탄 버튼 터치 감지
-canvas.addEventListener('touchstart', e => {
-  if (!powerups || !powerups.bomb) return;
-  const pos = getTouchCanvasPos(e.touches[0]);
-  if (Math.hypot(pos.x-(W-38), pos.y-(H-46)) < 30) useBomb();
-}, { passive: false });
 
 // ─── 전체 draw ────────────────────────────────────────────
 function draw() {
