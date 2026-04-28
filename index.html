@@ -83,14 +83,17 @@ let player, bullets, enemies, particles, drops, boss;
 let shootCooldown, enemyTimer, stateTimer;
 let powerups, stars;
 let villainKills;
-let touchPos = null; // 터치 위치
+let touchPos = null;
+let floatingTexts = [];  // 김상수 아파하는 텍스트
+let sangsuDeadTimer = 0; // 죽을 때 멘트 타이머
 
 // ─── 빌런 4인방 정의 ─────────────────────────────────────
+// 김상수: 선봉 + 체력 12 / 나머지: 체력 1
 const VILLAINS = [
-  { type:'junseob',   w:40, h:42, hp:6, maxHp:6, speed:0.55, score:200, color:'#ff6600', label:'정준섭', isVillain:true },
-  { type:'sangsu',    w:40, h:42, hp:6, maxHp:6, speed:0.60, score:200, color:'#00dd44', label:'김상수', isVillain:true },
-  { type:'mihee',     w:40, h:42, hp:6, maxHp:6, speed:0.50, score:200, color:'#ff44cc', label:'고미희', isVillain:true },
-  { type:'hyunkyung', w:40, h:42, hp:6, maxHp:6, speed:0.58, score:200, color:'#44aaff', label:'이현경', isVillain:true },
+  { type:'junseob',   w:40, h:42, hp:1,  maxHp:1,  speed:0.55, score:200, color:'#ff6600', label:'정준섭', isVillain:true },
+  { type:'sangsu',    w:46, h:50, hp:12, maxHp:12, speed:0.60, score:500, color:'#00dd44', label:'김상수', isVillain:true, isSangsu:true },
+  { type:'mihee',     w:40, h:42, hp:1,  maxHp:1,  speed:0.50, score:200, color:'#ff44cc', label:'고미희', isVillain:true },
+  { type:'hyunkyung', w:40, h:42, hp:1,  maxHp:1,  speed:0.58, score:200, color:'#44aaff', label:'이현경', isVillain:true },
 ];
 
 // ─── 일반 적 ─────────────────────────────────────────────
@@ -114,6 +117,7 @@ const DROP_DEFS = [
 function initGame() {
   frame = 0; score = 0; lives = 3;
   combo = 0; comboTimer = 0; villainKills = 0;
+  floatingTexts = []; sangsuDeadTimer = 0;
   stars = Array.from({length:110}, () => ({
     x: Math.random()*W, y: Math.random()*H,
     s: Math.random()*1.5+0.3, v: Math.random()*1.5+0.5,
@@ -123,14 +127,21 @@ function initGame() {
   boss=null; shootCooldown=0; enemyTimer=0;
   powerups = { rapid:0, triple:0, shield:0, speed:0, bomb:false };
 
-  // ★ 빌런 4대 동시 등장 (화면 위에서 간격 맞춰 진입)
-  VILLAINS.forEach((v, i) => {
+  // ★ 빌런 4대 동시 등장
+  // 김상수(선봉): 가장 앞(y 낮음), 나머지는 뒤에서 따라옴
+  const spawnOrder = [
+    { idx:1, x: W/2,   y: -30  },  // 김상수 선봉 - 중앙 최전방
+    { idx:0, x: 100,   y: -110 },  // 정준섭
+    { idx:2, x: W-100, y: -150 },  // 고미희
+    { idx:3, x: W/2+60,y: -200 },  // 이현경
+  ];
+  spawnOrder.forEach(({idx, x, y}) => {
+    const v = VILLAINS[idx];
     enemies.push({
       ...v,
       flash: 0,
-      x: 70 + i * 115,
-      y: -50 - i * 35,
-      vx: (i % 2 === 0 ? 0.5 : -0.5),
+      x, y,
+      vx: (idx % 2 === 0 ? 0.5 : -0.5),
       vy: v.speed,
     });
   });
@@ -282,6 +293,19 @@ function update() {
       const e = enemies[ei];
       if (!rect(b, e)) continue;
       remB.add(bi); e.hp--; e.flash = 6;
+
+      // 김상수 피격 시 아파하는 텍스트
+      if (e.isSangsu && e.hp > 0) {
+        const painTexts = ['아야!','아파!','왜때려!','으악!','아 진짜!','그만해!'];
+        floatingTexts.push({
+          x: e.x + (Math.random()-0.5)*30,
+          y: e.y - 20,
+          text: painTexts[Math.floor(Math.random()*painTexts.length)],
+          life: 70, maxLife: 70, color: '#00dd44',
+          vy: -1.2,
+        });
+      }
+
       if (e.hp <= 0) {
         remE.add(ei);
         explode(e.x, e.y, e.color, e.isVillain ? 25 : 14);
@@ -289,6 +313,8 @@ function update() {
         combo++; comboTimer = 100;
         score += e.score * Math.max(1, 1 + Math.floor(combo/5));
         if (e.isVillain) {
+          // 김상수 사망 시 특별 멘트
+          if (e.isSangsu) sangsuDeadTimer = 220;
           villainKills++;
           if (villainKills >= 4) {
             state = 'clear'; stateTimer = 300;
@@ -330,6 +356,10 @@ function update() {
 
   for (const p of particles) { p.x+=p.vx; p.y+=p.vy; p.vy+=0.04; p.life--; }
   particles = particles.filter(p => p.life > 0);
+
+  for (const t of floatingTexts) { t.y += t.vy; t.life--; }
+  floatingTexts = floatingTexts.filter(t => t.life > 0);
+  if (sangsuDeadTimer > 0) sangsuDeadTimer--;
 }
 
 // ─── 그리기 ──────────────────────────────────────────────
@@ -447,6 +477,40 @@ function drawParticle(p) {
   ctx.restore();
 }
 
+function drawFloatingTexts() {
+  for (const t of floatingTexts) {
+    ctx.save();
+    ctx.globalAlpha = t.life / t.maxLife;
+    ctx.fillStyle = t.color;
+    ctx.font = `bold ${13 + Math.floor((1 - t.life/t.maxLife)*4)}px sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(t.text, t.x, t.y);
+    ctx.restore();
+  }
+}
+
+function drawSangsuDead() {
+  if (sangsuDeadTimer <= 0) return;
+  const alpha = Math.min(1, sangsuDeadTimer / 40);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.textAlign = 'center';
+  // 배경 박스
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(W/2-160, H/2-110, 320, 80);
+  // 메인 멘트
+  ctx.shadowColor = '#00dd44'; ctx.shadowBlur = 20;
+  ctx.fillStyle = '#00dd44';
+  ctx.font = 'bold 36px sans-serif';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('모야모야 모야토', W/2, H/2-80);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#ff0';
+  ctx.font = '16px sans-serif';
+  ctx.fillText('김상수 격추 완료 !', W/2, H/2-50);
+  ctx.restore();
+}
+
 function drawHUD() {
   // 상단 빌런 진행
   ctx.fillStyle='rgba(0,0,0,0.55)'; ctx.fillRect(0,0,W,22);
@@ -556,6 +620,8 @@ function draw() {
   for (const b of bullets) drawBullet(b);
   for (const e of enemies) drawEnemy(e);
   if (player) drawPlayer();
+  drawFloatingTexts();
+  drawSangsuDead();
   drawHUD();
 
   if (state==='dead') {
